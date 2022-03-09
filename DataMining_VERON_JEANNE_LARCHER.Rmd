@@ -1,0 +1,630 @@
+---
+title: "Data Mining"
+author: "Mathieu VERON Alexandre JEANNE Pierre LARCHER"
+date: ' '
+lang: fr
+output:
+  rmdformats::material:
+  pdata_document:
+    dev: png
+    data_print: paged
+    highlight: null
+    theme: flatly
+    toc: yes
+    toc_float: True
+    collapsed: no
+    smooth_scroll: yes
+editor_options:
+  chunk_output_type: console
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(echo = F, message = F, warning = F, fig.width = 15, fig.asp = 0.7,  fig.align = 'center')
+
+#Ci-dessous code css pour l'esthétique de l'HTML.
+```
+
+```{css}
+body {
+  color: #17202A;
+}
+
+.header-panel {
+  background-color: #2C3E50;
+}
+
+.pages h1 {
+  color: #013971;
+}
+
+.main-content table th {
+    font-weight: 700;
+    background-color: #fff;
+    color: black;
+}
+.main-content h1 {
+  color: #2b5e77;
+  font-size: 2em;
+}
+
+.main-content h2 {
+  color: #6794a4;
+  font-weight: bold;
+    
+
+}
+
+.main-content h3 {
+  color: #a4c3cf
+}
+.main-content h4 {
+  color: #6c9cc4;
+    font-weight: bold;
+}
+
+a {
+  color: #6a8c91;
+  font-weight: bold;
+    
+}
+
+.page-header {
+    color: #fff;
+    text-align: center;
+    background-color: #159957;
+    background-image: linear-gradient(120deg,#2b5e77,#86ABB9);
+    padding: 3rem 3rem;
+}
+
+.toc .toc-box {
+    padding: 1.5rem;
+    background-color: #fff;
+    border: solid 1px #fff;
+    border-radius: .3rem;
+}
+```
+
+```{r packages}
+library(prettydoc) #Important pour la compilation pour le thème
+library(ada)
+library(corrplot)
+library(kableExtra)
+library(DT)
+library(data.table)
+library(tidyr)
+library(tidyverse)
+library(ggpubr)
+library(ggcorrplot)
+library(dplyr)
+library(forcats)
+library(scales)
+library(rsample)
+library(MASS)
+library(class)
+library(tidymodels)
+library(MASS)
+library(discrim)
+library(purrr)
+library(ROCR)
+library(kknn)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(caret)
+library(doParallel)
+library(ranger)
+
+theme_set(theme_minimal())
+```
+
+```{r import data}
+data <- read.csv("online_shoppers_intention.csv", header = T, sep = ",")
+```
+
+# Aperçu de la base de données
+
+Cette base de données est composée de différentes données tirées de session utilisateur sur un site internet de vente en ligne. Chaque session correspond à un utilisateur différent sur une période d'un an. Elle contient `r nrow(data)` observations correspondant à une session chacune pour `r ncol(data)` variables lesquelles sont décrites ci-dessous :
+
+- **Nb_page_administrative** : Nombre de pages de catégories administrative visitées.
+- **Duree_administrative** : Temps passé sur les pages de catégories administrative.
+- **Nb_page_information** : Nombre de pages de catégories information visitées.
+- **Duree_information** : Temps passé sur les pages de catégories information.
+- **Nb_page_produit** : Nombre de pages de catégories produit visitées.
+- **Duree_produit** : Temps passé sur les pages de catégories produit.
+- **Pourcentage_pub_quit** : Pourcentage de consommateurs étant rentrés vient un lien publicitaire et ayant quitté directement.
+- **Taux_sortie** : Pourcentage de fois que cette fois a été quittée par rapport aux autres.(Valeur par page?)
+- **Page_av_achat** : Nombre de page visitée par un consommateur avant un achat.
+- **Jour_special** : Jour particulier comme la Saint-Valentin par exemple.
+- **mois** : Mois de l'année
+- **Systeme_exploitation** : OS utilisé 
+- **Navigateur** : Navigateur utilisé
+- **Pays** : Pays du consommateur
+- **Type_trafic** : Type de traffic
+- **Type_visiteur** : Nouveau ou ancien visiteur
+- **Weekend** : Pendant le Week-End ou non
+- **Achat** : S'il y a eu achat ou non
+
+
+```{r renommage variables}
+#sum(is.na(data))
+# pas de données manquantes
+
+data <- data%>%
+  rename(Nb_page_administrative = Administrative)%>%
+  rename(Duree_administrative = Administrative_Duration)%>%
+  rename(Nb_page_information = Informational)%>%
+  rename(Duree_information = Informational_Duration)%>%
+  rename(Nb_page_produit = ProductRelated)%>%
+  rename(Duree_produit = ProductRelated_Duration)%>%
+  rename(Pourcentage_pub_quit = BounceRates)%>%
+  rename(Taux_sortie= ExitRates)%>%
+  rename(Page_av_achat = PageValues)%>%
+  rename(Jour_special = SpecialDay)%>%
+  rename(Mois = Month)%>%
+  rename(Systeme_exploitation = OperatingSystems)%>%
+  rename(Navigateur = Browser)%>%
+  rename(Pays = Region)%>%
+  rename(Type_trafic = TrafficType)%>%
+  rename(Type_visiteur = VisitorType)%>%
+  rename(Achat = Revenue)
+
+# mise en facteur des types de visiteurs,mois,we,achat et renommage 
+
+data$Type_visiteur<-factor(data$Type_visiteur)
+levels(data$Type_visiteur) <- c("Nouveaux", "Autres", "Anciens")
+
+data$Mois<-as.factor(data$Mois)
+# il manque deux mois dans la base de données Janvier et Avril
+
+data$Weekend<-as.factor(data$Weekend)
+levels(data$Weekend) <- c("Non","Oui")
+
+data$Achat<-as.factor(data$Achat)
+levels(data$Achat) <- c("Non","Oui")
+```
+
+Voici un premier aperçu de la base de données.
+
+```{r tail data}
+tail(data)%>%
+  kable()%>%
+  kable_styling(bootstrap_options = c("bordered", "striped"))%>%
+  scroll_box(width ="100%")
+```
+
+On remarque que nous n'avons pas de valeurs manquantes dans cette base de données.
+En revanche nous n'avons pas de renseignements sur les variables **Pays, Systeme_explotation, Navigateur** et la signification des valeurs qu'elles prennent.
+
+# Analyse descriptive
+
+## Variables quantitatives
+
+```{r}
+sum1 <- summary(data[,-c(18,17,16,11)])
+
+sum1%>%
+  kable()%>%
+  kable_styling(bootstrap_options = c("bordered", "striped", "hoover",full_width = F),latex_options = c("HOLD_position", "striped","scale_down"), position = "center")%>% 
+ scroll_box(width = "1100px", height = "450px")
+```
+
+Aucune précision concernant l'unité des données n'a été apporté. En vu du summary, nous considérerons le temps exprimé en seconde comme unité temporelle, converti en numéraire. 
+Cependant le choix d'unité temporelle n'a aucune incidence en terme de prédiction et création de modèle. Son importance est seulement notable en interprétation.
+
+## Variable qualitative
+
+```{r}
+summary(data[,c(18,17,16,11)])
+```
+
+```{r ventes par mois,echo=FALSE}
+datamonth <- as.data.frame(data$Mois)
+datamonth <- fct_relevel(data$Mois, c("Feb","Mar","May","June","Jul","Aug","Sep","Oct","Nov","Dec"))
+effectif <- c(184, 1907, 3364,  288,  432,  433,  448,  549, 2998, 1727 )
+datamonth <- as.data.frame(list(levels(datamonth),effectif))
+colnames(datamonth) <- c("Mois", "Effectif")
+
+datamonth$Mois<- factor(datamonth$Mois, levels = c("Feb","Mar","May","June","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+ggplot(datamonth, aes(x=Mois, y=effectif)) +
+  geom_bar(stat="identity",fill = "#7785D1", color = "white", alpha = 0.7) + 
+  labs(x="Mois", y="Effectif")+
+  geom_hline(yintercept=mean(datamonth$effectif), linetype="dashed", color = "#B03E32")+
+  ggtitle("Nombre de ventes par mois")+
+  annotate("text", x = 0.7, y = mean(datamonth$Effectif)+100, label = mean(datamonth$effectif), color="#B03E32")+
+  theme(plot.title = element_text(color="#364077", size=14, face="bold.italic"),
+        axis.title.x = element_text(color="#4351A6", size=14, face="bold"),
+        axis.title.y = element_text(color="#4351A6", size=14, face="bold"))+
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(data,aes(x= Type_visiteur))+
+  geom_bar(aes(x = Achat),fill = c("#B84134","#7785D1"), color = "white", alpha = 0.7)+
+  coord_flip()+ 
+  labs(title= "Proportion des visiteurs qui achètent",y= "Effectif",x="Achat ?")+
+  theme(plot.title = element_text(color="#364077", size=14, face="bold.italic"),
+        axis.title.x = element_text(color="#4351A6", size=14, face="bold"),
+        axis.title.y = element_text(color="#4351A6", size=14, face="bold"))+
+  annotate("text", x = 2, y = 2700, label = percent(sum(data$Achat=="Oui")/length(data$Achat),accuracy=0.01), color="#7785D1",size=7)+
+  ylim(0, 12000)+
+  annotate("text", x = 1, y = 11400, label = percent(sum(data$Achat=="Non")/length(data$Achat),accuracy=0.01), color="#B84134",size=7)+
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(data, aes(x = Achat, y = Nb_page_produit)) +
+  geom_violin(aes(fill = Achat, color = Achat)) +
+  scale_color_manual(values = c("#B84134","#7785D1"))+
+  coord_flip()+ 
+  labs(title= "Achat et Non Achat en fonction du nombre de pages consultées", y= "Nombre de page consultées", x="Achat")+
+  theme(plot.title = element_text(color="#364077", size=14, face="bold.italic"),
+        axis.title.x = element_text(color="#4351A6", size=14, face="bold"),
+        axis.title.y = element_text(color="#4351A6", size=14, face="bold"))+
+  theme_minimal()
+```
+
+```{r}
+ggplot(data) +
+  aes(x = Achat, fill = Type_visiteur) +
+  geom_bar(position = "dodge",color="#000000", alpha = 0.7) +
+  labs(fill = "Achat") +
+  scale_fill_manual(values=c("#B84134","#7785D1", "#4C8E55"))+
+  labs(title= "Type de visiteur selon achat ou non", y= "Proportion",x="Type de visiteur")+
+  theme(plot.title = element_text(color="#364077", size=14, face="bold.italic"),
+        axis.title.x = element_text(color="#4351A6", size=14, face="bold"),
+        axis.title.y = element_text(color="#4351A6", size=14, face="bold"))+
+  theme_minimal()
+```
+
+```{r Création des sous-échantillons apprentissages-test}
+set.seed(78)
+
+data_split <- initial_split(data, strata = Achat, prop = 2/3)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+```
+
+
+# KNN
+
+```{r}
+load(file = "knn_tune.Rdata")
+load(file = "knn_final_wf")
+```
+
+```{r}
+autoplot(knn_tune)+
+  aes(color = "K")+
+  labs(x = "Valeur de K", y = "Précision", title = "Précision du modèle KNN selon la valeur de K")+
+  geom_vline(xintercept = select_best(knn_tune)$neighbors, color = "#648FAA", lty = 2)+
+  scale_color_manual(values = c("#A3592C"))+
+  theme(legend.position = 'none')
+```
+
+```{r}
+knn_final_model <- knn_final_wf%>%
+  last_fit(data_split)
+```
+
+```{r}
+knn_fit <- knn_final_wf%>%
+  fit(data_train)
+```
+
+```{r}
+augment(knn_fit, new_data = data_test)%>%
+  roc_curve(truth = Achat, estimate = .pred_Non)%>%
+  autoplot()
+```
+
+```{r}
+augment(knn_fit, new_data = data_test)%>%
+  conf_mat(estimate = .pred_class, truth = Achat)
+```
+
+# LDA
+
+```{r}
+load("lda_wf.Rdata")
+```
+
+```{r}
+lda_fit <- lda_wf%>%
+  fit(data_train)
+```
+
+```{r}
+augment(lda_fit, new_data=data_test) %>% 
+  roc_curve(truth = Achat, estimate = .pred_Non)%>%
+  autoplot()
+```
+
+```{r}
+augment(lda_fit,new_data=data_test) %>%
+  conf_mat(estimate=.pred_class, truth=Achat) 
+```
+
+# QDA
+
+```{r}
+load(file = "qda_wf.Rdata")
+```
+
+
+```{r}
+qda_fit <- qda_wf%>%
+  fit(data_train)
+```
+
+```{r}
+augment(qda_fit,new_data=data_test) %>%
+  roc_curve(truth = Achat, estimate = .pred_Non)%>%
+  ggplot()+
+  aes(x = 1 - specificity, y = sensitivity)+
+  geom_path(color = "red")+
+  geom_abline()+
+  coord_equal()+
+  theme_minimal()
+```
+
+```{r}
+augment(qda_fit,new_data=data_test) %>% 
+  roc_auc(Achat, estimate = .pred_Non)
+```
+
+```{r}
+augment(qda_fit,new_data=data_test) %>%
+  conf_mat(estimate=.pred_class, truth=Achat)
+```
+
+# **Comparaison LDA QDA KNN**
+
+```{r}
+qda_plot <- augment(qda_fit,new_data=data_test)%>%
+  roc_curve(truth=data_test$Achat, estimate = .pred_Non)
+
+lda_plot <- augment(lda_fit,new_data=data_test)%>%
+  roc_curve(truth=data_test$Achat, estimate = .pred_Non)
+
+knn_plot <- augment(knn_fit, new_data = data_test)%>%
+  roc_curve(truth=data_test$Achat, estimate = .pred_Non)
+
+lda_col = "red"
+qda_col = "blue"
+knn_col = "green"
+
+ggplot(qda_plot)+
+  aes(x = 1 - specificity, y = sensitivity, color = "green")+
+  geom_path(lwd = 1.2)+
+  geom_path(data = lda_plot,aes(color = "red"), lwd = 1.2)+
+  geom_path(data = knn_plot, aes(color = "blue"), lwd = 1.2)+
+  geom_abline()+
+  coord_equal()+
+  geom_vline(xintercept = 0)+
+  geom_vline(xintercept = 1)+
+  geom_hline(yintercept = 0)+
+  geom_hline(yintercept = 1)+
+  theme(legend.position = "up")+
+  theme_minimal()+
+  scale_color_discrete(name = "Courbe ROC", labels = c("KNN", "QDA", "LDA"))
+```
+
+# Arbres
+
+```{r}
+control.max <- rpart.control(cp = 0, max.depth = 0, minbucket = 1, minsplit = 1)
+
+#minsplit = the minimum number of observations that must exist in a node in order for a split to be attempted.
+
+#minbucket = the minimum number of observations in any terminal <leaf> node. If only one of minbucket or minsplit is specified, the code either sets minsplit to minbucket*3 or minbucket to minsplit/3, as appropriate.
+
+tree <- rpart(Achat~. , data = data_train, control = control.max, parms = list(split = "information"))
+```
+
+```{r}
+plotcp(tree)
+tree$cp
+cp_t1 <- printcp(tree)
+
+cp_t1%>%
+  kable()%>%
+  kable_styling()%>%
+  scroll_box(height = "100%")
+```
+
+```{r}
+best_cp = cp_t1[which.min(cp_t1[,4]),1]
+
+control.prune <- rpart.control(cp = best_cp, max.depth = 0, minbucket = 1, minsplit = 1)
+
+prune_tree <- rpart(Achat~. , data = data_train, control = control.prune,parms = list(split = "information"))
+```
+
+```{r}
+prp(prune_tree, type = 1, extra = 0, split.box.col = "lightblue", cex = 0.6)
+```
+
+
+```{r}
+pred.tree <- predict(prune_tree, newdata = data_test, type = "class")
+
+table(pred.tree, data_test[,18])%>%
+  kable()%>%
+  kable_styling()%>%
+  column_spec(1, bold = T) %>%
+collapse_rows(columns = 1, valign = "middle")%>%
+add_header_above(c(" " = 1, "row header" = 2))
+
+mean(pred.tree != data_test[,18])
+```
+
+# Bagging
+
+```{r}
+nvar <- ncol(data) - 1
+
+bag <- randomForest(Achat~ .,
+  data = data_train, method = "class", ntree = 200,
+  parms = list(split = "gini"), mtry = nvar, na.action = na.roughfix, importance = T)
+```
+
+```{r}
+oob <- as.data.frame(bag$oob.times)
+
+ggplot(oob)+
+  aes(bag$oob.times)+
+  geom_histogram()
+```
+
+```{r}
+bag$confusion%>%
+  kable()%>%
+  kable_styling()
+```
+
+```{r}
+varImpPlot(bag)
+```
+
+```{r}
+pred_bag <- predict(bag, newdata = data_test, type = "class")
+
+table(pred_bag, data_test[,18])%>%
+  kable()%>%
+  kable_styling()
+
+mean(pred_bag != data_test[,18])
+
+```
+
+# Random Forest
+
+```{r}
+rf <- randomForest(Achat~ .,
+  data = data_train, method = "class", ntree = 200,
+  parms = list(split = "gini"), importance = T)
+```
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = tune())%>%
+  set_engine("randomForest", importance = T)%>%
+  set_mode("classification")
+```
+
+```{r}
+tune_rf_wf <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_recipe(rec)
+```
+
+```{r}
+rf_grid <- crossing(mtry = 1:17,
+                    trees = c(50, 100, 200, 500),
+                    min_n = c(2, 10, 20, 50, 100))
+```
+
+```{r}
+df_cv <- vfold_cv(data_train)
+
+library(doParallel)
+registerDoParallel(cores = 10)
+# 5 minutes avec 8 coeurs
+system.time(
+  rf_tune_res <- tune_grid(
+    tune_rf_wf, 
+    resamples = df_cv, 
+    grid = rf_grid, 
+    metrics = metric_set(accuracy)
+  )
+)
+#
+stopImplicitCluster()
+```
+
+
+```{r, cache=TRUE}
+doParallel::registerDoParallel(cores = 10)
+
+rfGrid <- expand.grid(mtry = c(1, 2, 4, 6, 8, 10, 12, 14, 16, nvar),
+                      min.node.size = c(10, 25, 50, 100),
+                      splitrule = "gini")
+
+ctrlCv <- trainControl(method = "repeatedcv", repeats = 2, number = 5)
+
+rf_tune <- train(Achat~.,
+  data = data_train, method = "ranger",
+  trControl = ctrlCv,
+  tuneGrid = rfGrid
+)
+
+save(rf_tune, file = "rf_tune.Rdata")
+stopImplicitCluster()
+```
+
+
+```{r}
+load("rf_tune.Rdata")
+rf_tune
+rf_tune$bestTune
+rf_tune$finalModel
+
+pred_rf <- predict(rf_tune, data_test)
+
+table(pred_rf, data_test[,18])
+mean(pred_rf != data_test[,18])
+```
+
+# Boosting
+
+```{r}
+boost <- ada(Achat~.,
+             data = data_train,
+             type = "discrete", loss = "exponential",
+             control = rpart.control(cp = 0),
+             iter = 200,
+             nu = 1)
+```
+
+```{r}
+boost
+summary(boost)
+plot(boost)
+```
+
+```{r, cache=TRUE}
+registerDoParallel(cores = 11)
+
+ctrlCv <- trainControl(method = "repeatedcv", 
+                       repeats = 2, number = 5)
+
+adaGrid <- expand.grid(maxdepth = c(1, 30), 
+                       iter = c(100, 200, 500, 1000), 
+                       nu = c(1, 0.01, 0.1))
+
+ada_tune <- train(Achat~ .,
+  data = data_train, method = "ada",
+  trControl = ctrlCv, tuneGrid = adaGrid)
+
+stopImplicitCluster()
+
+save(ada_tune, file = "ada_tune.Rdata")
+```
+
+
+```{r}
+load("ada_tune.Rdata")
+
+pred_boost <- predict(ada_tune, data_test)
+save(ada_tune, file = "AdaBoost.RData")
+
+table(pred_boost, data_test[,18])
+
+mean(pred_boost != data_test[,18])
+```
+
+
