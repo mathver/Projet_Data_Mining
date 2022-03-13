@@ -102,9 +102,6 @@ library(forcats)
 library(scales)
 library(rsample)
 library(MASS)
-library(class)
-library(tidymodels)
-library(MASS)
 library(discrim)
 library(purrr)
 library(ROCR)
@@ -115,6 +112,11 @@ library(randomForest)
 library(caret)
 library(doParallel)
 library(ranger)
+library(dials)
+library(themis)
+library(tidymodels)
+library(xgboost)
+library(baguette)
 
 theme_set(theme_minimal())
 ```
@@ -146,6 +148,7 @@ Cette base de données est composée de différentes données tirées de session
 - **Weekend** : Pendant le Week-End ou non
 - **Achat** : S'il y a eu achat ou non
 
+Nous avons choisi d'enlever la variable **Page_av_achat** pour des raisons de corrélation.
 
 ```{r renommage variables}
 #sum(is.na(data))
@@ -170,8 +173,11 @@ data <- data%>%
   rename(Type_visiteur = VisitorType)%>%
   rename(Achat = Revenue)
 
-# mise en facteur des types de visiteurs,mois,we,achat et renommage 
+# mise en facteur des types de visiteurs, mois, we, achat et renommage
+```
 
+
+```{r}
 data$Type_visiteur<-factor(data$Type_visiteur)
 levels(data$Type_visiteur) <- c("Nouveaux", "Autres", "Anciens")
 
@@ -181,8 +187,14 @@ data$Mois<-as.factor(data$Mois)
 data$Weekend<-as.factor(data$Weekend)
 levels(data$Weekend) <- c("Non","Oui")
 
-data$Achat<-as.factor(data$Achat)
+data$Achat <- as.factor(data$Achat)
 levels(data$Achat) <- c("Non","Oui")
+```
+
+
+```{r}
+data$Nb_page_total = data$Nb_page_administrative+data$Nb_page_information+data$Nb_page_produit
+data$Duree_total = data$Duree_administrative+data$Duree_information+data$Duree_produit
 ```
 
 Voici un premier aperçu de la base de données.
@@ -294,7 +306,7 @@ data_test <- testing(data_split)
 
 ```{r}
 load(file = "knn_tune.Rdata")
-load(file = "knn_final_wf")
+load(file = "knn_final_wf.Rdata")
 ```
 
 ```{r}
@@ -307,23 +319,23 @@ autoplot(knn_tune)+
 ```
 
 ```{r}
-knn_final_model <- knn_final_wf%>%
+knn_fit <- knn_final_wf%>%
   last_fit(data_split)
 ```
 
 ```{r}
-knn_fit <- knn_final_wf%>%
-  fit(data_train)
+knn_final_model <- knn_final_wf%>%
+  fit(data)
 ```
 
 ```{r}
-augment(knn_fit, new_data = data_test)%>%
+augment(knn_fit)%>%
   roc_curve(truth = Achat, estimate = .pred_Non)%>%
   autoplot()
 ```
 
 ```{r}
-augment(knn_fit, new_data = data_test)%>%
+augment(knn_fit)%>%
   conf_mat(estimate = .pred_class, truth = Achat)
 ```
 
@@ -335,18 +347,23 @@ load("lda_wf.Rdata")
 
 ```{r}
 lda_fit <- lda_wf%>%
-  fit(data_train)
+  last_fit(data_split)
 ```
 
 ```{r}
-augment(lda_fit, new_data=data_test) %>% 
+augment(lda_fit) %>% 
   roc_curve(truth = Achat, estimate = .pred_Non)%>%
   autoplot()
 ```
 
 ```{r}
-augment(lda_fit,new_data=data_test) %>%
+augment(lda_fit) %>%
   conf_mat(estimate=.pred_class, truth=Achat) 
+```
+
+```{r}
+augment(lda_fit) %>% 
+  roc_auc(truth = Achat, estimate = .pred_Non)
 ```
 
 # QDA
@@ -358,11 +375,11 @@ load(file = "qda_wf.Rdata")
 
 ```{r}
 qda_fit <- qda_wf%>%
-  fit(data_train)
+  last_fit(data_split)
 ```
 
 ```{r}
-augment(qda_fit,new_data=data_test) %>%
+augment(qda_fit) %>%
   roc_curve(truth = Achat, estimate = .pred_Non)%>%
   ggplot()+
   aes(x = 1 - specificity, y = sensitivity)+
@@ -373,25 +390,25 @@ augment(qda_fit,new_data=data_test) %>%
 ```
 
 ```{r}
-augment(qda_fit,new_data=data_test) %>% 
+augment(qda_fit) %>% 
   roc_auc(Achat, estimate = .pred_Non)
 ```
 
 ```{r}
-augment(qda_fit,new_data=data_test) %>%
+augment(qda_fit) %>%
   conf_mat(estimate=.pred_class, truth=Achat)
 ```
 
 # **Comparaison LDA QDA KNN**
 
 ```{r}
-qda_plot <- augment(qda_fit,new_data=data_test)%>%
+qda_plot <- augment(qda_fit)%>%
   roc_curve(truth=data_test$Achat, estimate = .pred_Non)
 
-lda_plot <- augment(lda_fit,new_data=data_test)%>%
+lda_plot <- augment(lda_fit)%>%
   roc_curve(truth=data_test$Achat, estimate = .pred_Non)
 
-knn_plot <- augment(knn_fit, new_data = data_test)%>%
+knn_plot <- augment(knn_fit)%>%
   roc_curve(truth=data_test$Achat, estimate = .pred_Non)
 
 lda_col = "red"
@@ -416,215 +433,125 @@ ggplot(qda_plot)+
 
 # Arbres
 
+
 ```{r}
-control.max <- rpart.control(cp = 0, max.depth = 0, minbucket = 1, minsplit = 1)
-
-#minsplit = the minimum number of observations that must exist in a node in order for a split to be attempted.
-
-#minbucket = the minimum number of observations in any terminal <leaf> node. If only one of minbucket or minsplit is specified, the code either sets minsplit to minbucket*3 or minbucket to minsplit/3, as appropriate.
-
-tree <- rpart(Achat~. , data = data_train, control = control.max, parms = list(split = "information"))
+load("tree_final_wf.Rdata")
+load("tree_tune.Rdata")
 ```
 
 ```{r}
-plotcp(tree)
-tree$cp
-cp_t1 <- printcp(tree)
-
-cp_t1%>%
-  kable()%>%
-  kable_styling()%>%
-  scroll_box(height = "100%")
+tree_fit <- tree_final_wf%>%
+  last_fit(data_split)
 ```
 
 ```{r}
-best_cp = cp_t1[which.min(cp_t1[,4]),1]
-
-control.prune <- rpart.control(cp = best_cp, max.depth = 0, minbucket = 1, minsplit = 1)
-
-prune_tree <- rpart(Achat~. , data = data_train, control = control.prune,parms = list(split = "information"))
+tree_fit %>%
+  extract_fit_engine()%>%
+  prp(type = 1, extra = 1, split.box.col = "lightblue", roundint = F)
 ```
 
 ```{r}
-prp(prune_tree, type = 1, extra = 0, split.box.col = "lightblue", cex = 0.6)
+augment(tree_fit)%>%
+  conf_mat(truth = Achat, estimate = .pred_class)
 ```
 
-
 ```{r}
-pred.tree <- predict(prune_tree, newdata = data_test, type = "class")
-
-table(pred.tree, data_test[,18])%>%
-  kable()%>%
-  kable_styling()%>%
-  column_spec(1, bold = T) %>%
-collapse_rows(columns = 1, valign = "middle")%>%
-add_header_above(c(" " = 1, "row header" = 2))
-
-mean(pred.tree != data_test[,18])
+tree_plot <- augment(tree_fit)%>%
+  roc_curve(truth = Achat, estimate = .pred_Non)
 ```
 
 # Bagging
 
 ```{r}
-nvar <- ncol(data) - 1
-
-bag <- randomForest(Achat~ .,
-  data = data_train, method = "class", ntree = 200,
-  parms = list(split = "gini"), mtry = nvar, na.action = na.roughfix, importance = T)
+load("bag_final_wf.Rdata")
+load("bag_tune.Rdata")
 ```
 
 ```{r}
-oob <- as.data.frame(bag$oob.times)
-
-ggplot(oob)+
-  aes(bag$oob.times)+
-  geom_histogram()
+bag_fit <- bag_final_wf%>%
+  last_fit(data_split)
 ```
 
 ```{r}
-bag$confusion%>%
-  kable()%>%
-  kable_styling()
+augment(bag_fit)%>%
+  conf_mat(truth = Achat, estimate = .pred_class)
 ```
 
 ```{r}
-varImpPlot(bag)
+bag_plot <- augment(bag_fit)%>%
+  roc_curve(truth = Achat, estimate = .pred_Non)
 ```
 
-```{r}
-pred_bag <- predict(bag, newdata = data_test, type = "class")
-
-table(pred_bag, data_test[,18])%>%
-  kable()%>%
-  kable_styling()
-
-mean(pred_bag != data_test[,18])
-
-```
 
 # Random Forest
 
 ```{r}
-rf <- randomForest(Achat~ .,
-  data = data_train, method = "class", ntree = 200,
-  parms = list(split = "gini"), importance = T)
-```
-
-```{r}
-rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = tune())%>%
-  set_engine("randomForest", importance = T)%>%
-  set_mode("classification")
-```
-
-```{r}
-tune_rf_wf <- workflow() %>% 
-  add_model(rf_spec) %>% 
-  add_recipe(rec)
-```
-
-```{r}
-rf_grid <- crossing(mtry = 1:17,
-                    trees = c(50, 100, 200, 500),
-                    min_n = c(2, 10, 20, 50, 100))
-```
-
-```{r}
-df_cv <- vfold_cv(data_train)
-
-library(doParallel)
-registerDoParallel(cores = 10)
-# 5 minutes avec 8 coeurs
-system.time(
-  rf_tune_res <- tune_grid(
-    tune_rf_wf, 
-    resamples = df_cv, 
-    grid = rf_grid, 
-    metrics = metric_set(accuracy)
-  )
-)
-#
-stopImplicitCluster()
-```
-
-
-```{r, cache=TRUE}
-doParallel::registerDoParallel(cores = 10)
-
-rfGrid <- expand.grid(mtry = c(1, 2, 4, 6, 8, 10, 12, 14, 16, nvar),
-                      min.node.size = c(10, 25, 50, 100),
-                      splitrule = "gini")
-
-ctrlCv <- trainControl(method = "repeatedcv", repeats = 2, number = 5)
-
-rf_tune <- train(Achat~.,
-  data = data_train, method = "ranger",
-  trControl = ctrlCv,
-  tuneGrid = rfGrid
-)
-
-save(rf_tune, file = "rf_tune.Rdata")
-stopImplicitCluster()
-```
-
-
-```{r}
+load("rf_final_wf.Rdata")
 load("rf_tune.Rdata")
-rf_tune
-rf_tune$bestTune
-rf_tune$finalModel
+```
 
-pred_rf <- predict(rf_tune, data_test)
+```{r}
+rf_fit <- rf_final_wf%>%
+  last_fit(data_split)
+```
 
-table(pred_rf, data_test[,18])
-mean(pred_rf != data_test[,18])
+```{r}
+augment(rf_fit)%>%
+  conf_mat(truth = Achat, estimate = .pred_class)
+```
+
+```{r}
+rf_plot <- augment(rf_fit)%>%
+  roc_curve(truth = Achat, estimate = .pred_Non)
 ```
 
 # Boosting
 
 ```{r}
-boost <- ada(Achat~.,
-             data = data_train,
-             type = "discrete", loss = "exponential",
-             control = rpart.control(cp = 0),
-             iter = 200,
-             nu = 1)
+load("boost_final_wf.Rdata")
+load("boost_tune.Rdata")
 ```
 
 ```{r}
-boost
-summary(boost)
-plot(boost)
+boost_fit <- boost_final_wf%>%
+  last_fit(data_split)
 ```
-
-```{r, cache=TRUE}
-registerDoParallel(cores = 11)
-
-ctrlCv <- trainControl(method = "repeatedcv", 
-                       repeats = 2, number = 5)
-
-adaGrid <- expand.grid(maxdepth = c(1, 30), 
-                       iter = c(100, 200, 500, 1000), 
-                       nu = c(1, 0.01, 0.1))
-
-ada_tune <- train(Achat~ .,
-  data = data_train, method = "ada",
-  trControl = ctrlCv, tuneGrid = adaGrid)
-
-stopImplicitCluster()
-
-save(ada_tune, file = "ada_tune.Rdata")
-```
-
 
 ```{r}
-load("ada_tune.Rdata")
-
-pred_boost <- predict(ada_tune, data_test)
-save(ada_tune, file = "AdaBoost.RData")
-
-table(pred_boost, data_test[,18])
-
-mean(pred_boost != data_test[,18])
+boost_fit %>%
+  extract_fit_engine()%>%
+  prp(type = 1, extra = 1, split.box.col = "lightblue", roundint = F)
 ```
 
+```{r}
+augment(boost_fit)%>%
+  conf_mat(truth = Achat, estimate = .pred_class)
+```
+
+```{r}
+boost_plot <- augment(boost_fit)%>%
+  roc_curve(truth = Achat, estimate = .pred_Non)
+```
+
+# Comparaison
+
+```{r}
+ggplot(qda_plot)+
+  aes(x = 1 - specificity, y = sensitivity, color = "yellow")+
+  geom_path(lwd = 1.2)+
+  geom_path(data = lda_plot, aes(color = "red"), lwd = 1.1)+
+  geom_path(data = knn_plot, aes(color = "blue"), lwd = 1.1)+
+  geom_path(data = tree_plot, aes(color = "black"), lwd = 1.1)+
+  geom_path(data = bag_plot, aes(color = "darkgreen"), lwd = 1.1)+
+  geom_path(data = rf_plot, aes(color = "pink"), lwd = 1.1)+
+  geom_path(data = boost_plot, aes(color = "purple"), lwd = 1.1)+
+  geom_abline()+
+  coord_equal()+
+  geom_vline(xintercept = 0)+
+  geom_vline(xintercept = 1)+
+  geom_hline(yintercept = 0)+
+  geom_hline(yintercept = 1)+
+  theme_minimal()+
+  scale_color_discrete(name = "Courbe ROC", labels = c("KNN", "QDA", "LDA", "Arbres", "Bagging", "Random Forest", "Boosting"))
+```
 
